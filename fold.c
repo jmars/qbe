@@ -368,6 +368,7 @@ foldint(Con *res, int op, int w, Con *cl, Con *cr)
 	switch (op) {
 	case Oadd:  x = l.u + r.u; break;
 	case Osub:  x = l.u - r.u; break;
+	case Oneg:  x = -l.u; break;
 	case Odiv:  x = w ? l.s / r.s : (int32_t)l.s / (int32_t)r.s; break;
 	case Orem:  x = w ? l.s % r.s : (int32_t)l.s % (int32_t)r.s; break;
 	case Oudiv: x = w ? l.u / r.u : (uint32_t)l.u / (uint32_t)r.u; break;
@@ -464,6 +465,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 		switch (op) {
 		case Oadd: xd = ld + rd; break;
 		case Osub: xd = ld - rd; break;
+		case Oneg: xd = -ld; break;
 		case Odiv: xd = ld / rd; break;
 		case Omul: xd = ld * rd; break;
 		case Oswtof: xd = (int32_t)cl->bits.i; break;
@@ -480,6 +482,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 		switch (op) {
 		case Oadd: xs = ls + rs; break;
 		case Osub: xs = ls - rs; break;
+		case Oneg: xs = -ls; break;
 		case Odiv: xs = ls / rs; break;
 		case Omul: xs = ls * rs; break;
 		case Oswtof: xs = (int32_t)cl->bits.i; break;
@@ -496,7 +499,7 @@ foldflt(Con *res, int op, int w, Con *cl, Con *cr)
 static int
 opfold(int op, int cls, Con *cl, Con *cr, Fn *fn)
 {
-	int nc;
+	Ref r;
 	Con c;
 
 	if ((op == Odiv || op == Oudiv
@@ -507,13 +510,7 @@ opfold(int op, int cls, Con *cl, Con *cr, Fn *fn)
 			return Bot;
 	} else
 		foldflt(&c, op, cls == Kd, cl, cr);
-	if (c.type == CBits)
-		nc = getcon(c.bits.i, fn).val;
-	else {
-		nc = fn->ncon;
-		vgrow(&fn->con, ++fn->ncon);
-	}
+	r = newcon(&c, fn);
 	assert(!(cls == Ks || cls == Kd) || c.flt);
-	fn->con[nc] = c;
-	return nc;
+	return r.val;
 }

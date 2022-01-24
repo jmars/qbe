@@ -109,11 +109,11 @@ enum {
 	TMask = 16383, /* for temps hash */
 	BMask = 8191, /* for blocks hash */
 
-	K = 3233235, /* found using tools/lexh.c */
+	K = 4331239, /* found using tools/lexh.c */
 	M = 23,
 };
 
-static char lexh[1 << (32-M)];
+static uchar lexh[1 << (32-M)];
 static FILE *inf;
 static char *inpath;
 static int thead;
@@ -161,7 +161,7 @@ lexinit()
 	for (i=0; i<NPubOp; ++i)
 		if (optab[i].name)
 			kwmap[i] = optab[i].name;
-	assert(Ntok <= CHAR_MAX);
+	assert(Ntok <= UCHAR_MAX);
 	for (i=0; i<Ntok; ++i)
 		if (kwmap[i]) {
 			h = hash(kwmap[i])*K >> M;
@@ -381,7 +381,6 @@ static Ref
 parseref()
 {
 	Con c;
-	int i;
 
 	memset(&c, 0, sizeof c);
 	switch (next()) {
@@ -405,14 +404,7 @@ parseref()
 		c.type = CAddr;
 		c.label = intern(tokval.str);
 	Look:
-		for (i=0; i<curf->ncon; i++)
-			if (curf->con[i].type == c.type
-			&& curf->con[i].bits.i == c.bits.i
-			&& curf->con[i].label == c.label)
-				return CON(i);
-		vgrow(&curf->con, ++curf->ncon);
-		curf->con[i] = c;
-		return CON(i);
+		return newcon(&c, curf);
 	default:
 		return R;
 	}
