@@ -3,68 +3,61 @@
 
 char *gasloc, *gassym;
 
-static void
-startdat(FILE *f, char *section, char *name, int align, int export, int zero)
+void
+gasemitlnk(char *n, Lnk *l, char *s, FILE *f)
 {
 	char *p;
 
-	if (section)
-		fprintf(f, ".section %s\n", section);
-	else
-		fprintf(f, "%s\n", zero ? ".bss" : ".data");
-	fprintf(f, ".balign %d\n", align);
-	p = name[0] == '"' ? "" : gassym;
-	if (export)
-		fprintf(f, ".globl %s%s\n", p, name);
-	fprintf(f, "%s%s:\n", p, name);
+	if (l->sec) {
+		fprintf(f, ".section %s", l->sec);
+		if (l->secf)
+			fprintf(f, ", %s", l->secf);
+	} else {
+		fputs(s, f);
+	}
+	fputc('\n', f);
+	if (l->align)
+		fprintf(f, ".balign %d\n", l->align);
+	p = n[0] == '"' ? "" : gassym;
+	if (l->export)
+		fprintf(f, ".globl %s%s\n", p, n);
+	fprintf(f, "%s%s:\n", p, n);
 }
 
 void
 gasemitdat(Dat *d, FILE *f)
 {
-	static int aligned, export;
 	static char *dtoa[] = {
-		[DAlign] = ".balign",
 		[DB] = "\t.byte",
 		[DH] = "\t.short",
 		[DW] = "\t.int",
 		[DL] = "\t.quad"
 	};
-	static char *name, *section;
-	static int64_t zero;
+	static int64_t bss;
 	char *p;
 
 	switch (d->type) {
 	case DStart:
-		aligned = 0;
-		zero = 0;
-		section = d->u.str;
+		bss = 0;
 		break;
 	case DEnd:
-		if (zero != -1) {
-			startdat(f, section, name, aligned, export, 1);
-			fprintf(f, "\t.fill %"PRId64",1,0\n", zero);
+		if (bss != -1) {
+			gasemitlnk(d->name, d->lnk, ".bss", f);
+			fprintf(f, "\t.fill %"PRId64",1,0\n", bss);
 		}
 		break;
-	case DAlign:
-		aligned = d->u.num;
-		break;
-	case DName:
-		name = d->u.str;
-		export = d->export;
-		break;
 	case DZ:
-		if (zero != -1)
-			zero += d->u.num;
+		if (bss != -1)
+			bss += d->u.num;
 		else
 			fprintf(f, "\t.fill %"PRId64",1,0\n", d->u.num);
 		break;
 	default:
-		if (zero != -1) {
-			startdat(f, section, name, aligned, export, 0);
-			if (zero > 0)
-				fprintf(f, "\t.fill %"PRId64",1,0\n", zero);
-			zero = -1;
+		if (bss != -1) {
+			gasemitlnk(d->name, d->lnk, ".data", f);
+			if (bss > 0)
+				fprintf(f, "\t.fill %"PRId64",1,0\n", bss);
+			bss = -1;
 		}
 		if (d->isstr) {
 			if (d->type != DB)
@@ -72,9 +65,9 @@ gasemitdat(Dat *d, FILE *f)
 			fprintf(f, "\t.ascii %s\n", d->u.str);
 		}
 		else if (d->isref) {
-			p = d->u.ref.nam[0] == '"' ? "" : gassym;
+			p = d->u.ref.name[0] == '"' ? "" : gassym;
 			fprintf(f, "%s %s%s%+"PRId64"\n",
-				dtoa[d->type], p, d->u.ref.nam,
+				dtoa[d->type], p, d->u.ref.name,
 				d->u.ref.off);
 		}
 		else {

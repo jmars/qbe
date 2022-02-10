@@ -203,8 +203,8 @@ selcmp(Ref arg[2], int k, int swap, Fn *fn)
 static void
 sel(Ins i, ANum *an, Fn *fn)
 {
-	Ref r0, r1;
-	int x, k, kc, swap;
+	Ref r0, r1, tmp[7];
+	int x, j, k, kc, sh, swap;
 	int64_t sz;
 	Ins *i0, *i1;
 
@@ -267,6 +267,71 @@ sel(Ins i, ANum *an, Fn *fn)
 		i1 = curi;
 		emit(Ocopy, Kw, TMP(RCX), r0, R);
 		fixarg(&i1->arg[0], argcls(&i, 0), i1, fn);
+		break;
+	case Ouwtof:
+		r0 = newtmp("utof", Kl, fn);
+		emit(Osltof, k, i.to, r0, R);
+		emit(Oextuw, Kl, r0, i.arg[0], R);
+		fixarg(&curi->arg[0], k, curi, fn);
+		break;
+	case Oultof:
+		/* %mask =l and %arg.0, 1
+		   %isbig =l shr %arg.0, 63
+		   %divided =l shr %arg.0, %isbig
+		   %or =l or %mask, %divided
+		   %float =d sltof %or
+		   %cast =l cast %float
+		   %addend =l shl %isbig, 52
+		   %sum =l add %cast, %addend
+		   %result =d cast %sum
+		*/
+		r0 = newtmp("utof", k, fn);
+		if (k == Ks)
+			kc = Kw, sh = 23;
+		else
+			kc = Kl, sh = 52;
+		for (j=0; j<4; j++)
+			tmp[j] = newtmp("utof", Kl, fn);
+		for (; j<7; j++)
+			tmp[j] = newtmp("utof", kc, fn);
+		emit(Ocast, k, i.to, tmp[6], R);
+		emit(Oadd, kc, tmp[6], tmp[4], tmp[5]);
+		emit(Oshl, kc, tmp[5], tmp[1], getcon(sh, fn));
+		emit(Ocast, kc, tmp[4], r0, R);
+		emit(Osltof, k, r0, tmp[3], R);
+		emit(Oor, Kl, tmp[3], tmp[0], tmp[2]);
+		emit(Oshr, Kl, tmp[2], i.arg[0], tmp[1]);
+		sel(*curi++, 0, fn);
+		emit(Oshr, Kl, tmp[1], i.arg[0], getcon(63, fn));
+		fixarg(&curi->arg[0], Kl, curi, fn);
+		emit(Oand, Kl, tmp[0], i.arg[0], getcon(1, fn));
+		fixarg(&curi->arg[0], Kl, curi, fn);
+		break;
+	case Ostoui:
+		i.op = Ostosi;
+		kc = Ks;
+		tmp[4] = getcon(0xdf000000, fn);
+		goto Oftoui;
+	case Odtoui:
+		i.op = Odtosi;
+		kc = Kd;
+		tmp[4] = getcon(0xc3e0000000000000, fn);
+	Oftoui:
+		if (k == Kw)
+			goto Emit;
+		r0 = newtmp("ftou", kc, fn);
+		for (j=0; j<4; j++)
+			tmp[j] = newtmp("ftou", Kl, fn);
+		emit(Oor, Kl, i.to, tmp[0], tmp[3]);
+		emit(Oand, Kl, tmp[3], tmp[2], tmp[1]);
+		emit(i.op, Kl, tmp[2], r0, R);
+		emit(Oadd, kc, r0, tmp[4], i.arg[0]);
+		i1 = curi; /* fixarg() can change curi */
+		fixarg(&i1->arg[0], kc, i1, fn);
+		fixarg(&i1->arg[1], kc, i1, fn);
+		emit(Osar, Kl, tmp[1], tmp[0], getcon(63, fn));
+		emit(i.op, Kl, tmp[0], i.arg[0], R);
+		fixarg(&curi->arg[0], Kl, curi, fn);
 		break;
 	case Onop:
 		break;
