@@ -5,23 +5,6 @@
 
 Target T;
 
-extern Target T_amd64_sysv;
-extern Target T_arm64;
-
-static struct TMap {
-	char *name;
-	Target *T;
-} tmap[] = {
-	{ "amd64_sysv", &T_amd64_sysv },
-	{ "arm64", &T_arm64 },
-	{ 0, 0 }
-};
-
-enum Asm {
-	Gasmacho,
-	Gaself,
-};
-
 char debug['Z'+1] = {
 	['P'] = 0, /* parsing */
 	['M'] = 0, /* memory optimization */
@@ -35,6 +18,16 @@ char debug['Z'+1] = {
 	['R'] = 0, /* reg. allocation */
 };
 
+extern Target T_amd64_sysv;
+extern Target T_arm64;
+extern Target T_rv64;
+
+static Target *tlist[] = {
+	&T_amd64_sysv,
+	&T_arm64,
+	&T_rv64,
+	0
+};
 static FILE *outf;
 static int dbg;
 
@@ -99,6 +92,7 @@ func(Fn *fn)
 			fn->rpo[n]->link = fn->rpo[n+1];
 	if (!dbg) {
 		T.emitfn(fn, outf);
+		gasemitfntail(fn->name, outf);
 		fprintf(outf, "/* end function %s */\n\n", fn->name);
 	} else
 		fprintf(stderr, "\n");
@@ -108,7 +102,7 @@ func(Fn *fn)
 int
 main(int ac, char *av[])
 {
-	struct TMap *tm;
+	Target **t;
 	FILE *inf, *hf;
 	char *f, *sep;
 	int c, asmmode;
@@ -135,13 +129,17 @@ main(int ac, char *av[])
 			}
 			break;
 		case 't':
-			for (tm=tmap;; tm++) {
-				if (!tm->name) {
+			if (strcmp(optarg, "?") == 0) {
+				puts(T.name);
+				exit(0);
+			}
+			for (t=tlist;; t++) {
+				if (!*t) {
 					fprintf(stderr, "unknown target '%s'\n", optarg);
 					exit(1);
 				}
-				if (strcmp(optarg, tm->name) == 0) {
-					T = *tm->T;
+				if (strcmp(optarg, (*t)->name) == 0) {
+					T = **t;
 					break;
 				}
 			}
@@ -164,24 +162,15 @@ main(int ac, char *av[])
 			fprintf(hf, "\t%-11s output to file\n", "-o file");
 			fprintf(hf, "\t%-11s generate for a target among:\n", "-t <target>");
 			fprintf(hf, "\t%-11s ", "");
-			for (tm=tmap, sep=""; tm->name; tm++, sep=", ")
-				fprintf(hf, "%s%s", sep, tm->name);
+			for (t=tlist, sep=""; *t; t++, sep=", ")
+				fprintf(hf, "%s%s", sep, (*t)->name);
 			fprintf(hf, "\n");
 			fprintf(hf, "\t%-11s generate gas (e) or osx (m) asm\n", "-G {e,m}");
 			fprintf(hf, "\t%-11s dump debug information\n", "-d <flags>");
 			exit(c != 'h');
 		}
 
-	switch (asmmode) {
-	case Gaself:
-		gasloc = ".L";
-		gassym = "";
-		break;
-	case Gasmacho:
-		gasloc = "L";
-		gassym = "_";
-		break;
-	}
+	gasinit(asmmode);
 
 	do {
 		f = av[optind];

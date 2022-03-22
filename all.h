@@ -40,6 +40,7 @@ enum {
 };
 
 struct Target {
+	char name[16];
 	int gpr0;   /* first general purpose reg */
 	int ngpr;
 	int fpr0;   /* first floating point reg */
@@ -179,7 +180,7 @@ enum {
 #define isarg(o) INRANGE(o, Oarg, Oargv)
 #define isret(j) INRANGE(j, Jret0, Jretc)
 
-enum Class {
+enum {
 	Kx = -1, /* "top" class (see usecheck() and clsmerge()) */
 	Kw,
 	Kl,
@@ -357,7 +358,8 @@ struct Fn {
 
 struct Typ {
 	char name[NString];
-	int dark;
+	char isdark;
+	char isunion;
 	int align;
 	uint64_t size;
 	uint nunion;
@@ -441,7 +443,9 @@ void chuse(Ref, int, Fn *);
 Ref newcon(Con *, Fn *);
 Ref getcon(int64_t, Fn *);
 int addcon(Con *, Con *);
-void blit(Ref, uint, Ref, uint, Fn *);
+void blit(Ref, uint, Ref, uint, uint, Fn *);
+void blit0(Ref, Ref, uint, Fn *);
+void salloc(Ref, Ref, Fn *);
 void dumpts(BSet *, Tmp *, FILE *);
 
 void bsinit(BSet *, uint);
@@ -521,9 +525,15 @@ void spill(Fn *);
 void rega(Fn *);
 
 /* gas.c */
+enum Asm {
+	Gasmacho,
+	Gaself,
+};
 extern char *gasloc;
 extern char *gassym;
+void gasinit(enum Asm);
 void gasemitlnk(char *, Lnk *, char *, FILE *);
+void gasemitfntail(char *, FILE *);
 void gasemitdat(Dat *, FILE *);
 int gasstash(void *, int);
 void gasemitfin(FILE *);

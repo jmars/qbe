@@ -63,7 +63,7 @@ a # character and finish with the end of the line.
     # Define the string constant.
     data $str = { b "hello world", b 0 }
 
-    function w $main() {
+    export function w $main() {
     @start
             # Call the puts function with $str as argument.
             %r =w call $puts(l $str)
@@ -202,7 +202,7 @@ constants by the linker.
 
     `bnf
     LINKAGE :=
-        'extern'
+        'export'
       | 'section' SECNAME
       | 'section' SECNAME SECFLAGS
 
@@ -213,11 +213,10 @@ Function and data definitions (see below) can specify
 linkage information to be passed to the assembler and
 eventually to the linker.
 
-The `extern` linkage flag marks the defined item as
+The `export` linkage flag marks the defined item as
 visible outside the current file's scope.  If absent,
 the symbol can only be referred to locally.  Functions
-compiled by QBE and called from C need to have extern
-linkage.
+compiled by QBE and called from C need to be exported.
 
 A `section` flag can be specified to tell the linker to
 put the defined item in a certain section.  The use of
@@ -225,14 +224,17 @@ the section flag is platform dependent and we refer the
 user to the documentation of their assembler and linker
 for relevant information.
 
-    export section ".bss"
-    data $zerobuf = { z 1024 }
+    section ".init_array"
+    data $.init.f = { l $f }
 
-Example uses of the section flag include adding function
-pointers to a global initialization list, or storing a
-zeroed object in the BSS section, as depicted above.
+The section flag can be used to add function pointers to
+a global initialization list, as depicted above.  Note
+that some platforms provide a BSS section that can be
+used to minimize the footprint of uniformly zeroed data.
+When this section is available, QBE will automatically
+make use of it and no section flag is required.
 
-The section and extern linkage flags should each appear
+The section and export linkage flags should each appear
 at most once in a definition.  If multiple occurrences
 are present, QBE is free to use any.
 
@@ -245,7 +247,7 @@ data, and functions.  Aggregate types are never exported
 and do not compile to any code.  Data and function
 definitions have file scope and are mutually recursive
 (even across IL files).  Their visibility can be controlled
-using the `export` keyword.
+using linkage flags.
 
 ~ Aggregate Types
 ~~~~~~~~~~~~~~~~~
@@ -749,7 +751,7 @@ Extending the precision of a temporary is done using the
 `ext` family of instructions.  Because QBE types do not
 precise the signedness (like in LLVM), extension instructions
 exist to sign-extend and zero-extend a value.  For example,
-`extsb` takes a word argument and sign-extend the 8
+`extsb` takes a word argument and sign-extends the 8
 least-significant bits to a full word or long, depending on
 the return type.
 
@@ -761,7 +763,7 @@ zero.
 
 Converting between signed integers and floating points is done
 using `stosi` (single to signed integer), `stoui` (single to
-unsigned integer`, `dtosi` (double to signed integer), `dtoui`
+unsigned integer, `dtosi` (double to signed integer), `dtoui`
 (double to unsigned integer), `swtof` (signed word to float),
 `uwtof` (unsigned word to float), `sltof` (signed long to
 float) and `ultof` (unsigned long to float).
@@ -854,6 +856,7 @@ alignment required by all the targets.
 
     type :valist = align 8 { 24 }  # For amd64_sysv
     type :valist = align 8 { 32 }  # For arm64
+    type :valist = align 8 { 8 }   # For rv64
 
 The following example defines a variadic function adding
 its first three arguments.
@@ -953,6 +956,7 @@ instructions unless you know exactly what you are doing.
       * `and`
       * `div`
       * `mul`
+      * `neg`
       * `or`
       * `rem`
       * `sar`

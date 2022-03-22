@@ -1,6 +1,6 @@
 #include "all.h"
 
-typedef struct Class_ Class;
+typedef struct Class Class;
 typedef struct Insl Insl;
 typedef struct Params Params;
 
@@ -9,7 +9,7 @@ enum {
 	Cptr = 2, /* replaced by a pointer */
 };
 
-struct Class_ {
+struct Class {
 	char class;
 	char ishfa;
 	struct {
@@ -41,13 +41,15 @@ static int fpreg[12] = {V0, V1, V2, V3, V4, V5, V6, V7};
 
 /* layout of call's second argument (RCall)
  *
- *  29   13    9    5   2  0
- *  |0.00|x|xxxx|xxxx|xxx|xx|                  range
- *        |    |    |   |  ` gp regs returned (0..2)
- *        |    |    |   ` fp regs returned    (0..4)
- *        |    |    ` gp regs passed          (0..8)
- *        |     ` fp regs passed              (0..8)
- *        ` is x8 used                        (0..1)
+ *         13
+ *  29   14 |    9    5   2  0
+ *  |0.00|x|x|xxxx|xxxx|xxx|xx|                  range
+ *        | |    |    |   |  ` gp regs returned (0..2)
+ *        | |    |    |   ` fp regs returned    (0..4)
+ *        | |    |    ` gp regs passed          (0..8)
+ *        | |     ` fp regs passed              (0..8)
+ *        | ` indirect result register x8 used  (0..1)
+ *        ` env pointer passed in x9            (0..1)
  */
 
 static int
@@ -94,12 +96,15 @@ typclass(Class *c, Typ *t, int *gp, int *fp)
 	if (t->align > 4)
 		err("alignments larger than 16 are not supported");
 
-	if (t->dark || sz > 16 || sz == 0) {
+	if (t->isdark || sz > 16 || sz == 0) {
 		/* large structs are replaced by a
 		 * pointer to some caller-allocated
 		 * memory */
 		c->class |= Cptr;
 		c->size = 8;
+		c->ngp = 1;
+		*c->reg = *gp;
+		*c->cls = Kl;
 		return;
 	}
 
@@ -178,12 +183,14 @@ selret(Blk *b, Fn *fn)
 
 	if (j == Jretc) {
 		typclass(&cr, &typ[fn->retty], gpreg, fpreg);
-		cty = (cr.nfp << 2) | cr.ngp;
 		if (cr.class & Cptr) {
 			assert(rtype(fn->retr) == RTmp);
-			blit(fn->retr, 0, r, cr.t->size, fn);
-		} else
+			blit0(fn->retr, r, cr.t->size, fn);
+			cty = 0;
+		} else {
 			ldregs(cr.reg, cr.cls, cr.nreg, r, fn);
+			cty = (cr.nfp << 2) | cr.ngp;
+		}
 	} else {
 		k = j - Jretw;
 		if (KBASE(k) == 0) {
@@ -199,12 +206,13 @@ selret(Blk *b, Fn *fn)
 }
 
 static int
-argsclass(Ins *i0, Ins *i1, Class *carg, Ref *env)
+argsclass(Ins *i0, Ins *i1, Class *carg)
 {
-	int ngp, nfp, *gp, *fp;
+	int envc, ngp, nfp, *gp, *fp;
 	Class *c;
 	Ins *i;
 
+	envc = 0;
 	gp = gpreg;
 	fp = fpreg;
 	ngp = 8;
@@ -213,16 +221,16 @@ argsclass(Ins *i0, Ins *i1, Class *carg, Ref *env)
 		switch (i->op) {
 		case Opar:
 		case Oarg:
-			c->cls[0] = i->cls;
+			*c->cls = i->cls;
 			c->size = 8;
 			if (KBASE(i->cls) == 0 && ngp > 0) {
 				ngp--;
-				c->reg[0] = *gp++;
+				*c->reg = *gp++;
 				break;
 			}
 			if (KBASE(i->cls) == 1 && nfp > 0) {
 				nfp--;
-				c->reg[0] = *fp++;
+				*c->reg = *fp++;
 				break;
 			}
 			c->class |= Cstk;
@@ -230,14 +238,7 @@ argsclass(Ins *i0, Ins *i1, Class *carg, Ref *env)
 		case Oparc:
 		case Oargc:
 			typclass(c, &typ[i->arg[0].val], gp, fp);
-			if (c->class & Cptr) {
-				if (ngp > 0) {
-					ngp--;
-					c->reg[0] = *gp++;
-					c->cls[0] = Kl;
-					break;
-				}
-			} else if (c->ngp <= ngp) {
+			if (c->ngp <= ngp) {
 				if (c->nfp <= nfp) {
 					ngp -= c->ngp;
 					nfp -= c->nfp;
@@ -251,10 +252,10 @@ argsclass(Ins *i0, Ins *i1, Class *carg, Ref *env)
 			c->class |= Cstk;
 			break;
 		case Opare:
-			*env = i->to;
-			break;
 		case Oarge:
-			*env = i->arg[0];
+			*c->reg = R9;
+			*c->cls = Kl;
+			envc = 1;
 			break;
 		case Oargv:
 			break;
@@ -262,7 +263,7 @@ argsclass(Ins *i0, Ins *i1, Class *carg, Ref *env)
 			die("unreachable");
 		}
 
-	return ((gp-gpreg) << 5) | ((fp-fpreg) << 9);
+	return envc << 14 | (gp-gpreg) << 5 | (fp-fpreg) << 9;
 }
 
 bits
@@ -290,14 +291,15 @@ bits
 arm64_argregs(Ref r, int p[2])
 {
 	bits b;
-	int ngp, nfp, x8;
+	int ngp, nfp, x8, x9;
 
 	assert(rtype(r) == RCall);
 	ngp = (r.val >> 5) & 15;
 	nfp = (r.val >> 9) & 15;
 	x8 = (r.val >> 13) & 1;
+	x9 = (r.val >> 14) & 1;
 	if (p) {
-		p[0] = ngp + x8;
+		p[0] = ngp + x8 + x9;
 		p[1] = nfp;
 	}
 	b = 0;
@@ -305,7 +307,7 @@ arm64_argregs(Ref r, int p[2])
 		b |= BIT(R0+ngp);
 	while (nfp--)
 		b |= BIT(V0+nfp);
-	return b | ((bits)x8 << R8);
+	return b | ((bits)x8 << R8) | ((bits)x9 << R9);
 }
 
 static void
@@ -330,14 +332,13 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 {
 	Ins *i;
 	Class *ca, *c, cr;
-	int cty, envc;
+	int cty;
 	uint n;
 	uint64_t stk, off;
-	Ref r, rstk, env, tmp[4];
+	Ref r, rstk, tmp[4];
 
-	env = R;
 	ca = alloc((i1-i0) * sizeof ca[0]);
-	cty = argsclass(i0, i1, ca, &env);
+	cty = argsclass(i0, i1, ca);
 
 	stk = 0;
 	for (i=i0, c=ca; i<i1; i++, c++) {
@@ -359,6 +360,10 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 		stkblob(i1->to, &cr, fn, ilp);
 		cty |= (cr.nfp << 2) | cr.ngp;
 		if (cr.class & Cptr) {
+			/* spill & rega expect calls to be
+			 * followed by copies from regs,
+			 * so we emit a dummy
+			 */
 			cty |= 1 << 13 | 1;
 			emit(Ocopy, Kw, R, TMP(R0), R);
 		} else {
@@ -380,10 +385,6 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 
 	emit(Ocall, 0, R, i1->arg[0], CALL(cty));
 
-	envc = !req(R, env);
-	if (envc)
-		die("todo (arm abi): env calls");
-
 	if (cty & (1 << 13))
 		/* struct return argument */
 		emit(Ocopy, Kl, TMP(R8), i1->to, R);
@@ -391,12 +392,13 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 	for (i=i0, c=ca; i<i1; i++, c++) {
 		if ((c->class & Cstk) != 0)
 			continue;
-		if (i->op == Oarg)
+		if (i->op == Oarg || i->op == Oarge)
 			emit(Ocopy, *c->cls, TMP(*c->reg), i->arg[0], R);
 		if (i->op == Oargc)
 			ldregs(c->reg, c->cls, c->nreg, i->arg[1], fn);
 	}
 
+	/* populate the stack */
 	off = 0;
 	for (i=i0, c=ca; i<i1; i++, c++) {
 		if ((c->class & Cstk) == 0)
@@ -407,7 +409,7 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 			emit(Oadd, Kl, r, TMP(SP), getcon(off, fn));
 		}
 		if (i->op == Oargc)
-			blit(TMP(SP), off, i->arg[1], c->size, fn);
+			blit(TMP(SP), off, i->arg[1], 0, c->size, fn);
 		off += c->size;
 	}
 	if (stk)
@@ -415,7 +417,7 @@ selcall(Fn *fn, Ins *i0, Ins *i1, Insl **ilp)
 
 	for (i=i0, c=ca; i<i1; i++, c++)
 		if (c->class & Cptr)
-			blit(i->arg[0], 0, i->arg[1], c->t->size, fn);
+			blit0(i->arg[0], i->arg[1], c->t->size, fn);
 }
 
 static Params
@@ -425,13 +427,12 @@ selpar(Fn *fn, Ins *i0, Ins *i1)
 	Insl *il;
 	Ins *i;
 	int n, s, cty;
-	Ref r, env, tmp[16], *t;
+	Ref r, tmp[16], *t;
 
-	env = R;
 	ca = alloc((i1-i0) * sizeof ca[0]);
 	curi = &insb[NIns];
 
-	cty = argsclass(i0, i1, ca, &env);
+	cty = argsclass(i0, i1, ca);
 	fn->reg = arm64_argregs(CALL(cty), 0);
 
 	il = 0;
@@ -456,9 +457,9 @@ selpar(Fn *fn, Ins *i0, Ins *i1)
 	}
 
 	t = tmp;
-	for (i=i0, c=ca, s=2; i<i1; i++, c++) {
-		if (i->op == Oparc
-		&& (c->class & Cptr) == 0) {
+	s = 2;
+	for (i=i0, c=ca; i<i1; i++, c++)
+		if (i->op == Oparc && !(c->class & Cptr)) {
 			if (c->class & Cstk) {
 				fn->tmp[i->to.val].slot = -s;
 				s += c->size / 8;
@@ -468,18 +469,11 @@ selpar(Fn *fn, Ins *i0, Ins *i1)
 					emit(Ocopy, c->cls[n], *t++, r, R);
 				}
 		} else if (c->class & Cstk) {
-			r = newtmp("abi", Kl, fn);
-			emit(Oload, *c->cls, i->to, r, R);
-			emit(Oaddr, Kl, r, SLOT(-s), R);
+			emit(Oload, *c->cls, i->to, SLOT(-s), R);
 			s++;
 		} else {
-			r = TMP(*c->reg);
-			emit(Ocopy, *c->cls, i->to, r, R);
+			emit(Ocopy, *c->cls, i->to, TMP(*c->reg), R);
 		}
-	}
-
-	if (!req(R, env))
-		die("todo (arm abi): env calls");
 
 	return (Params){
 		.nstk = s - 2,

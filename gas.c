@@ -2,6 +2,23 @@
 
 
 char *gasloc, *gassym;
+static int gasasm;
+
+void
+gasinit(enum Asm asmmode)
+{
+	gasasm = asmmode;
+	switch (gasasm) {
+	case Gaself:
+		gasloc = ".L";
+		gassym = "";
+		break;
+	case Gasmacho:
+		gasloc = "L";
+		gassym = "_";
+		break;
+	}
+}
 
 void
 gasemitlnk(char *n, Lnk *l, char *s, FILE *f)
@@ -25,6 +42,15 @@ gasemitlnk(char *n, Lnk *l, char *s, FILE *f)
 }
 
 void
+gasemitfntail(char *fn, FILE *f)
+{
+	if (gasasm == Gaself) {
+		fprintf(f, ".type %s, @function\n", fn);
+		fprintf(f, ".size %s, .-%s\n", fn, fn);
+	}
+}
+
+void
 gasemitdat(Dat *d, FILE *f)
 {
 	static char *dtoa[] = {
@@ -33,31 +59,31 @@ gasemitdat(Dat *d, FILE *f)
 		[DW] = "\t.int",
 		[DL] = "\t.quad"
 	};
-	static int64_t bss;
+	static int64_t zero;
 	char *p;
 
 	switch (d->type) {
 	case DStart:
-		bss = 0;
+		zero = 0;
 		break;
 	case DEnd:
-		if (bss != -1) {
+		if (zero != -1) {
 			gasemitlnk(d->name, d->lnk, ".bss", f);
-			fprintf(f, "\t.fill %"PRId64",1,0\n", bss);
+			fprintf(f, "\t.fill %"PRId64",1,0\n", zero);
 		}
 		break;
 	case DZ:
-		if (bss != -1)
-			bss += d->u.num;
+		if (zero != -1)
+			zero += d->u.num;
 		else
 			fprintf(f, "\t.fill %"PRId64",1,0\n", d->u.num);
 		break;
 	default:
-		if (bss != -1) {
+		if (zero != -1) {
 			gasemitlnk(d->name, d->lnk, ".data", f);
-			if (bss > 0)
-				fprintf(f, "\t.fill %"PRId64",1,0\n", bss);
-			bss = -1;
+			if (zero > 0)
+				fprintf(f, "\t.fill %"PRId64",1,0\n", zero);
+			zero = -1;
 		}
 		if (d->isstr) {
 			if (d->type != DB)

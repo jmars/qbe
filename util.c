@@ -399,7 +399,7 @@ addcon(Con *c0, Con *c1)
 }
 
 void
-blit(Ref rdst, uint doff, Ref rsrc, uint sz, Fn *fn)
+blit(Ref rdst, uint doff, Ref rsrc, uint boff, uint sz, Fn *fn)
 {
 	struct { int st, ld, cls, size; } *p, tbl[] = {
 		{ Ostorel, Oload,   Kl, 8 },
@@ -408,9 +408,9 @@ blit(Ref rdst, uint doff, Ref rsrc, uint sz, Fn *fn)
 		{ Ostoreb, Oloadub, Kw, 1 }
 	};
 	Ref r, r1;
-	uint boff, s;
+	uint s;
 
-	for (boff=0, p=tbl; sz; p++)
+	for (p=tbl; sz; p++)
 		for (s=p->size; sz>=s; sz-=s, doff+=s, boff+=s) {
 			r = newtmp("blt", Kl, fn);
 			r1 = newtmp("blt", Kl, fn);
@@ -420,6 +420,42 @@ blit(Ref rdst, uint doff, Ref rsrc, uint sz, Fn *fn)
 			emit(p->ld, p->cls, r, r1, R);
 			emit(Oadd, Kl, r1, rsrc, getcon(boff, fn));
 		}
+}
+
+void
+blit0(Ref rdst, Ref rsrc, uint sz, Fn *fn)
+{
+	blit(rdst, 0, rsrc, 0, sz, fn);
+}
+
+void
+salloc(Ref rt, Ref rs, Fn *fn)
+{
+	Ref r0, r1;
+	int64_t sz;
+
+	/* we need to make sure
+	 * the stack remains aligned
+	 * (rsp = 0) mod 16
+	 */
+	fn->dynalloc = 1;
+	if (rtype(rs) == RCon) {
+		sz = fn->con[rs.val].bits.i;
+		if (sz < 0 || sz >= INT_MAX-15)
+			err("invalid alloc size %"PRId64, sz);
+		sz = (sz + 15)  & -16;
+		emit(Osalloc, Kl, rt, getcon(sz, fn), R);
+	} else {
+		/* r0 = (r + 15) & -16 */
+		r0 = newtmp("isel", Kl, fn);
+		r1 = newtmp("isel", Kl, fn);
+		emit(Osalloc, Kl, rt, r0, R);
+		emit(Oand, Kl, r0, r1, getcon(-16, fn));
+		emit(Oadd, Kl, r1, rs, getcon(15, fn));
+		if (fn->tmp[rs.val].slot != -1)
+			err("unlikely alloc argument %%%s for %%%s",
+				fn->tmp[rs.val].name, fn->tmp[rt.val].name);
+	}
 }
 
 void
