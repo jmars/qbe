@@ -185,13 +185,11 @@ main(int ac, char *av[])
 			}
 		}
 		parse(inf, f, data, func);
+		fclose(inf);
 	} while (++optind < ac);
 
-	if (!dbg) {
+	if (!dbg)
 		gasemitfin(outf);
-		if (asmmode == Gaself)
-			fprintf(outf, ".section .note.GNU-stack,\"\",@progbits\n");
-	}
 
 	exit(0);
 }

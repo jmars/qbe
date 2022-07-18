@@ -1,8 +1,8 @@
 #!/bin/sh
 
 dir=`cd $(dirname "$0"); pwd`
-bin=$dir/../obj/qbe
-binref=$dir/../obj/qbe.ref
+bin=$dir/../qbe
+binref=$dir/../qbe.ref
 
 tmp=/tmp/qbe.zzzz
 
@@ -79,8 +79,8 @@ init() {
 			cc="cc"
 			;;
 		*)
-			cc="cc -no-pie"
-			testcc "$cc" || cc="cc"
+			cc="${CC:-cc} -no-pie"
+			testcc "$cc" || cc="${CC:-cc}"
 			;;
 		esac
 		TARGET=`$bin -t?`
