@@ -196,7 +196,7 @@ static int
 lex()
 {
 	static char tok[NString];
-	int c, i, esc;
+	int c, i, esc, s;
 	int t;
 
 	do
@@ -222,12 +222,20 @@ lex()
 	case '+':
 		return Tplus;
 	case 's':
-		if (fscanf(inf, "_%f", &tokval.flts) != 1)
+		s = fgetc(inf);
+		if (s != '_') {
+			ungetc(s, inf);
 			break;
+		}
+		fscanf(inf, "%f", &tokval.flts);
 		return Tflts;
 	case 'd':
-		if (fscanf(inf, "_%lf", &tokval.fltd) != 1)
+		s = fgetc(inf);
+		if (s != '_') {
+			ungetc(s, inf);
 			break;
+		}
+		fscanf(inf, "%lf", &tokval.fltd);
 		return Tfltd;
 	case '%':
 		t = Ttmp;
